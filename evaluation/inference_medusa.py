@@ -77,6 +77,10 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
         best_candidate, accept_length = evaluate_posterior(
                 logits, candidates, temperature, posterior_threshold, posterior_alpha
             )
+        past_key_values_data = []
+        for key_cache, value_cache in past_key_values:
+            past_key_values_data.extend([key_cache, value_cache])
+        past_key_values_data = torch.cat(past_key_values_data, dim=0)
         input_ids, logits, medusa_logits, new_token = update_inference_inputs(
                 input_ids,
                 candidates,
