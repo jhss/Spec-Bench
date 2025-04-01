@@ -1,6 +1,5 @@
 import torch
 
-
 class KVCache:
     """
     A key-value cache for the model.

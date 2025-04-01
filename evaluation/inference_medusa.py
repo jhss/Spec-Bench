@@ -16,7 +16,7 @@ from fastchat.utils import str_to_torch_dtype
 
 from model.medusa.utils import *
 from model.medusa.medusa_model import MedusaModel
-from model.medusa.kv_cache import initialize_past_key_values
+from model.medusa.kv_cache import initialize_past_key_values_llama
 from model.medusa.medusa_choices import *
 
 def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None, temperature=0.0, posterior_threshold=0.09, posterior_alpha=0.3, max_steps=512):
@@ -46,18 +46,21 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
         # Reset the past key and value states
         current_length_data.zero_()
     else:
+        (past_key_values, current_length_data) = initialize_past_key_values_llama(model)
         past_key_values = DynamicCache()
         model.past_key_values = past_key_values
         model.past_key_values_data = None
-        model.current_length_data = None
+        model.current_length_data = current_length_data
 
     input_len = input_ids.shape[1]
     cur_length = input_len
+    
     reset_medusa_mode(model)
     medusa_logits, logits = initialize_medusa(
             input_ids, model, medusa_buffers["medusa_attn_mask"], past_key_values
     )
     new_token = 0
+    current_length_data[:] = cur_length
     
     for idx in range(max_steps): # idx: new decoding steps
         candidates, tree_candidates = generate_candidates(
@@ -80,7 +83,7 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
         past_key_values_data = []
         for key_cache, value_cache in past_key_values:
             past_key_values_data.extend([key_cache, value_cache])
-        past_key_values_data = torch.cat(past_key_values_data, dim=0)
+        past_key_values_data = torch.stack(past_key_values_data, dim=0)
         input_ids, logits, medusa_logits, new_token = update_inference_inputs(
                 input_ids,
                 candidates,

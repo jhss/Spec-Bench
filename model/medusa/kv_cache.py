@@ -112,6 +112,10 @@ def initialize_past_key_values(model):
         )
     return past_key_values, past_key_values_data, current_length_data
 
-def initialize_past_key_values_hf(model):
+def initialize_past_key_values_llama(model):
     past_key_values = DynamicCache()
-    return past_key_values, None, None
+    
+    current_length_data = torch.zeros(
+        model.config.num_hidden_layers * 2, dtype=torch.long, device="cpu"
+    )
+    return past_key_values, current_length_data
