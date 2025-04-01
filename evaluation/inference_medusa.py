@@ -4,6 +4,11 @@ Usage:
 python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fastchat-t5-3b-v1.0
 """
 import argparse
+import os
+os.environ["HF_HOME"] = "/datasets/models"
+os.environ["token"] = "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"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+from transformers import DynamicCache
 
 from evaluation.eval import run_eval, reorg_answer_file
 
@@ -41,14 +46,10 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
         # Reset the past key and value states
         current_length_data.zero_()
     else:
-        (
-            past_key_values,
-            past_key_values_data,
-            current_length_data,
-        ) = initialize_past_key_values(model.base_model)
+        past_key_values = DynamicCache()
         model.past_key_values = past_key_values
-        model.past_key_values_data = past_key_values_data
-        model.current_length_data = current_length_data
+        model.past_key_values_data = None
+        model.current_length_data = None
 
     input_len = input_ids.shape[1]
     cur_length = input_len

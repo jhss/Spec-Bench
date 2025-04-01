@@ -1,5 +1,5 @@
 import torch
-
+from transformers import DynamicCache
 
 class KVCache:
     """
@@ -111,3 +111,7 @@ def initialize_past_key_values(model):
             ]
         )
     return past_key_values, past_key_values_data, current_length_data
+
+def initialize_past_key_values_hf(model):
+    past_key_values = DynamicCache()
+    return past_key_values, None, None

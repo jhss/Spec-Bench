@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel, PretrainedConfig
+from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
@@ -95,7 +95,8 @@ class MedusaModel(nn.Module):
         self.medusa = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
         self.base_model_name_or_path = base_model_name_or_path
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path,
+                                                       token="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")
         # Create a list of Medusa heads
         self.medusa_head = nn.ModuleList(
             [
@@ -146,8 +147,13 @@ class MedusaModel(nn.Module):
             print("Overriding base_model as:", base_model)
             medusa_config.base_model_name_or_path = base_model
             
-        base_model = KVLlamaForCausalLM.from_pretrained(
-            medusa_config.base_model_name_or_path, **kwargs
+        # base_model = KVLlamaForCausalLM.from_pretrained(
+        #     medusa_config.base_model_name_or_path, **kwargs
+        # )
+        base_model = AutoModelForCausalLM.from_pretrained(
+            medusa_config.base_model_name_or_path,
+            token="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",
+            **kwargs
         )
 
         model = cls(
@@ -156,14 +162,15 @@ class MedusaModel(nn.Module):
             medusa_config.medusa_num_layers,
             medusa_config.base_model_name_or_path,
         )
-        medusa_head_path = os.path.join(medusa_head_name_or_path, "medusa_lm_head.pt")
-        if os.path.exists(medusa_head_path):
-            filename = medusa_head_path
-        else:
-            filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.pt")
-        medusa_head_state_dict = torch.load(filename, map_location=base_model.device)
-        model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
-
+        # medusa_head_path = os.path.join(medusa_head_name_or_path, "medusa_lm_head.pt")
+        # if os.path.exists(medusa_head_path):
+        #     filename = medusa_head_path
+        # else:
+        #     filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.pt")
+        #medusa_head_state_dict = torch.load(filename, map_location=base_model.device)
+        #model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
+        for i in range(medusa_config.medusa_num_heads):
+            model.medusa_head[i][1].weight.data = base_model.lm_head.weight.data.clone()
         return model
 
     def forward(
@@ -191,6 +198,7 @@ class MedusaModel(nn.Module):
         """
         with torch.inference_mode():
             # Pass input through the base model
+            # [TODO] check the first inference of attention mask and position_ids
             outputs = self.base_model.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
