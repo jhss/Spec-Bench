@@ -8,7 +8,7 @@ from .medusa_choices import mc_sim_7b_63
 from transformers import AutoTokenizer
 import os
 from huggingface_hub import hf_hub_download
-
+from safetensors.torch import load_file
 
 class MedusaConfig(PretrainedConfig):
     """
@@ -95,14 +95,16 @@ class MedusaModel(nn.Module):
         self.medusa = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
         self.base_model_name_or_path = base_model_name_or_path
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path,
+        # self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path,
+        #                                                token="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")
+        self.tokenizer = AutoTokenizer.from_pretrained("/datasets/models/speculative_decoding/test_medusa_mlp_Llama-3.2-3B-Instruct_medusa_3_lr_0.001_layers_1",
                                                        token="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")
         # Create a list of Medusa heads
         self.medusa_head = nn.ModuleList(
             [
                 nn.Sequential(
                     *([ResBlock(self.hidden_size)] * medusa_num_layers),
-                    nn.Linear(self.hidden_size, self.vocab_size, bias=False),
+                    nn.Linear(self.hidden_size, self.hidden_size, bias=False),
                 )
                 for _ in range(medusa_num_heads)
             ]
@@ -111,9 +113,9 @@ class MedusaModel(nn.Module):
         # Ensure medusa_head's dtype and device align with the base_model
         self.medusa_head.to(self.base_model.dtype).to(self.base_model.device)
 
-        for i in range(medusa_num_heads):
-            # Initialize the weights of each medusa_head using the base model's weights
-            self.medusa_head[i][-1].weight.data[:] = base_model.lm_head.weight.data[:]
+        # for i in range(medusa_num_heads):
+        #     # Initialize the weights of each medusa_head using the base model's weights
+        #     self.medusa_head[i][-1].weight.data[:] = base_model.lm_head.weight.data[:]
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
@@ -169,8 +171,18 @@ class MedusaModel(nn.Module):
         #     filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.pt")
         #medusa_head_state_dict = torch.load(filename, map_location=base_model.device)
         #model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
-        for i in range(medusa_config.medusa_num_heads):
-            model.medusa_head[i][1].weight.data = base_model.lm_head.weight.data.clone()
+        # for i in range(medusa_config.medusa_num_heads):
+        #     model.medusa_head[i][1].weight.data = base_model.lm_head.weight.data.clone()
+        medusa_head_path = os.path.join(medusa_head_name_or_path, "medusa_lm_head.safetensors")
+        if os.path.exists(medusa_head_path):
+            #filename = medusa_head_path
+            medusa_head_state_dict = load_file(medusa_head_path)
+        else:
+            filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.safetensors")
+            medusa_head_state_dict = load_file(filename)
+            #medusa_head_state_dict = torch.load(filename, map_location=base_model.device)
+        
+        model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
         return model
 
     def forward(
@@ -212,7 +224,9 @@ class MedusaModel(nn.Module):
         medusa_logits = []
         # TODO: Consider parallelizing this loop for efficiency?
         for i in range(self.medusa):
-            medusa_logits.append(self.medusa_head[i](hidden_states))
+            mhidden_states = self.medusa_head[i](hidden_states)
+            mlogits = self.base_model.lm_head(mhidden_states)
+            medusa_logits.append(mlogits)
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
         return torch.stack(medusa_logits, dim=0)
@@ -325,6 +339,7 @@ class MedusaModel(nn.Module):
                 new_token,
                 past_key_values_data,
                 current_length_data,
+                self.get_tokenizer()
             )
 
             yield {

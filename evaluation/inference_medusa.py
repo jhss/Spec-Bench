@@ -7,7 +7,8 @@ import argparse
 import os
 os.environ["HF_HOME"] = "/datasets/models"
 os.environ["token"] = "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"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from transformers import DynamicCache
 
 from evaluation.eval import run_eval, reorg_answer_file
@@ -47,7 +48,6 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
         current_length_data.zero_()
     else:
         (past_key_values, current_length_data) = initialize_past_key_values_llama(model)
-        past_key_values = DynamicCache()
         model.past_key_values = past_key_values
         model.past_key_values_data = None
         model.current_length_data = current_length_data
@@ -63,6 +63,7 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
     current_length_data[:] = cur_length
     
     for idx in range(max_steps): # idx: new decoding steps
+        # print("step: ", idx)
         candidates, tree_candidates = generate_candidates(
                 medusa_logits,
                 logits,
@@ -96,10 +97,14 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
                 new_token,
                 past_key_values_data,
                 current_length_data,
+                tokenizer
             )
         accept_length_tree = input_ids.shape[1] - cur_length
         cur_length = accept_length_tree + cur_length
         accept_length_list.append(accept_length_tree)
+        past_key_values.crop(cur_length)
+        #past_key_values = truncate_past_key_values(past_key_values, cur_length)
+        
         if tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
             break
         if new_token > max_new_tokens:
@@ -186,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dtype",
         type=str,
-        default="float16",
+        default="bfloat16",
         choices=["float32", "float64", "float16", "bfloat16"],
         help="Override the default dtype. If not set, it will use float16 on GPU.",
     )

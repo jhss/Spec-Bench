@@ -88,6 +88,8 @@ def generate_medusa_buffers(medusa_choices, device="cuda"):
         start += depth_counts[i]
 
     # Generate retrieval indices for Medusa structure verification
+    # A 경로가 B 경로의 일부인 경우, A는 제외하고 길이가 가장 긴 B경로를 선택한다.
+    # medusa_chocie = [1, 2, 3] 인 경우, retrive_indice = [ [1]의 인덱스, [1, 2]의 인덱스, [1, 2, 3]의 인덱스]로 표현된다.
     retrieve_indices_nest = []
     retrieve_paths = []
     for i in range(len(sorted_medusa_choices)):
@@ -97,7 +99,7 @@ def generate_medusa_buffers(medusa_choices, device="cuda"):
             continue
         else:
             for c in range(len(cur_medusa_choice)):
-                retrieve_indice.append(sorted_medusa_choices.index(cur_medusa_choice[:c+1]))
+                retrieve_indice.append(sorted_medusa_choices.index(cur_medusa_choice[:c+1])) # Assume all of its prefixes already appear as individual paths
                 retrieve_paths.append(cur_medusa_choice[:c+1])
         retrieve_indices_nest.append(retrieve_indice)
     max_length = max([len(x) for x in retrieve_indices_nest])
@@ -109,9 +111,9 @@ def generate_medusa_buffers(medusa_choices, device="cuda"):
     # Aggregate the generated buffers into a dictionary
     medusa_buffers = {
         "medusa_attn_mask": medusa_attn_mask.unsqueeze(0).unsqueeze(0),
-        "tree_indices": medusa_tree_indices,
-        "medusa_position_ids": medusa_position_ids,
-        "retrieve_indices": retrieve_indices,
+        "tree_indices": medusa_tree_indices, # Medusa tree에서 각 branch를 나타내는 identifier (서로 다른 branch가 마지막 depth의 같은 node에서 만나는 경우 중복된 값을 갖는다.)
+        "medusa_position_ids": medusa_position_ids, 
+        "retrieve_indices": retrieve_indices, # 현재 branch의 ancestor들의 (sorted_medusa_chocies 상에서) index sequence
         }
     
     # Move the tensors in the dictionary to the specified device
@@ -215,12 +217,13 @@ def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices):
 
     # Combine the selected candidate from the original logits with the topk medusa logits.
     candidates = torch.cat([candidates_logit, candidates_medusa_logits.view(-1)], dim=-1)
-
+    #print("tree indices: ", tree_indices)
+    #print("candidates: ", candidates)
     # Map the combined candidates to the tree indices to get tree candidates.
     tree_candidates = candidates[tree_indices]
 
     # Extend the tree candidates by appending a zero.
-    tree_candidates_ext = torch.cat([tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device)], dim=0)
+    tree_candidates_ext = torch.cat([tree_candidates, torch.zeros((1,), dtype=torch.long, device=tree_candidates.device)], dim=0)
 
     # Retrieve the cartesian candidates using the retrieve indices.
     cart_candidates = tree_candidates_ext[retrieve_indices]
@@ -294,8 +297,10 @@ def evaluate_posterior(
     - best_candidate (torch.Tensor): Index of the chosen best candidate.
     - accept_length (int): Length of the accepted candidate sequence.
     """
+    
     # Greedy decoding based on temperature value
     if temperature == 0:
+        #return 0, 1
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
             candidates[:, 1:].to(logits.device) == torch.argmax(logits[:, :-1], dim=-1)
@@ -303,6 +308,7 @@ def evaluate_posterior(
         candidates_accept_length = (torch.cumprod(posterior_mask, dim=1)).sum(dim=1)
         accept_length = candidates_accept_length.max()
         # Choose the best candidate
+        # accept_length = 0
         if accept_length == 0:
             # Default to the first candidate if none are accepted
             best_candidate = torch.tensor(0, dtype=torch.long, device=candidates.device)
@@ -351,6 +357,7 @@ def update_inference_inputs(
     new_token,
     past_key_values_data,
     current_length_data,
+    tokenizer
 ):
     """
     Update the input sequences and relevant tensors based on the selected best candidate from the inference results.
@@ -379,6 +386,13 @@ def update_inference_inputs(
         retrieve_indices[best_candidate, : accept_length + 1] + prev_input_len
     )
     # Append the tokens from the best candidate to the input sequence
+    accept_tokens = candidates[None, best_candidate, : accept_length + 1]
+    total_outputs = tokenizer.decode(accept_tokens[0].tolist())
+    intermediate_outputs = tokenizer.decode(accept_tokens[0][1:].tolist())
+    print("==================================================================================")
+    print(f"[DEBUG] Total Outputs: {total_outputs}\n[DEBUG] Intermediate Outputs: {intermediate_outputs}")
+    print(f"[DEBUG] Accept length: ", accept_length)
+    print("prev input len: ", input_ids.shape[1])
     input_ids = torch.cat(
         [input_ids, candidates[None, best_candidate, : accept_length + 1]], dim=-1
     )
@@ -402,3 +416,12 @@ def update_inference_inputs(
     new_token += accept_length + 1
 
     return input_ids, logits, medusa_logits, new_token
+
+def truncate_past_key_values(past_key_values, cur_length):
+    for i in range(len(past_key_values)):
+        key_cache, value_cache = past_key_values[i]
+        new_key = key_cache.narrow(2, 0, cur_length)
+        new_value = value_cache.narrow(2, 0, cur_length)
+        past_key_values[i] = (new_key, new_value)
+    setattr(past_key_values, "_seen_tokens", cur_length)
+    return past_key_values
