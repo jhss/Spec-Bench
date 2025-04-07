@@ -97,7 +97,7 @@ class MedusaModel(nn.Module):
         self.base_model_name_or_path = base_model_name_or_path
         # self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path,
         #                                                token="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")
-        self.tokenizer = AutoTokenizer.from_pretrained("/datasets/models/speculative_decoding/test_medusa_mlp_Llama-3.2-3B-Instruct_medusa_3_lr_0.001_layers_1",
+        self.tokenizer = AutoTokenizer.from_pretrained("/home/Spec-Bench/test_medusa_mlp_Llama-3.2-3B-Instruct_medusa_3_lr_0.001_layers_1",
                                                        token="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")
         # Create a list of Medusa heads
         self.medusa_head = nn.ModuleList(

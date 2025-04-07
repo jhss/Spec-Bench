@@ -5,9 +5,9 @@ python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fa
 """
 import argparse
 import os
-os.environ["HF_HOME"] = "/datasets/models"
+os.environ["HF_HOME"] = "/home"
 os.environ["token"] = "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"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from transformers import DynamicCache
 
@@ -95,6 +95,7 @@ def medusa_forward(inputs, model, tokenizer, max_new_tokens, medusa_choices=None
                 logits,
                 medusa_logits,
                 new_token,
+                past_key_values,
                 past_key_values_data,
                 current_length_data,
                 tokenizer

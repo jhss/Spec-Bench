@@ -355,6 +355,7 @@ def update_inference_inputs(
     logits,
     medusa_logits,
     new_token,
+    past_key_values,
     past_key_values_data,
     current_length_data,
     tokenizer
@@ -389,10 +390,10 @@ def update_inference_inputs(
     accept_tokens = candidates[None, best_candidate, : accept_length + 1]
     total_outputs = tokenizer.decode(accept_tokens[0].tolist())
     intermediate_outputs = tokenizer.decode(accept_tokens[0][1:].tolist())
-    print("==================================================================================")
-    print(f"[DEBUG] Total Outputs: {total_outputs}\n[DEBUG] Intermediate Outputs: {intermediate_outputs}")
-    print(f"[DEBUG] Accept length: ", accept_length)
-    print("prev input len: ", input_ids.shape[1])
+    # print("==================================================================================")
+    # print(f"[DEBUG] Total Outputs: {total_outputs}\n[DEBUG] Intermediate Outputs: {intermediate_outputs}")
+    # print(f"[DEBUG] Accept length: ", accept_length)
+    # print("prev input len: ", input_ids.shape[1])
     input_ids = torch.cat(
         [input_ids, candidates[None, best_candidate, : accept_length + 1]], dim=-1
     )
@@ -403,6 +404,19 @@ def update_inference_inputs(
     dst = past_key_values_data[..., prev_input_len : prev_input_len + tgt.shape[-2], :]
     # Copy relevant past information from the source to the destination
     dst.copy_(tgt, non_blocking=True)
+
+    for i, (key_cache, value_cache) in enumerate(past_key_values):
+        # For keys:
+        # Select the past key slices corresponding to the accepted candidate tokens.
+        tgt_key = key_cache[..., select_indices, :]
+        # Determine the destination slice where these keys should be copied.
+        dst_key = key_cache[..., prev_input_len : prev_input_len + tgt_key.shape[-2], :]
+        dst_key.copy_(tgt_key, non_blocking=True)
+        
+        # For values:
+        tgt_value = value_cache[..., select_indices, :]
+        dst_value = value_cache[..., prev_input_len : prev_input_len + tgt_value.shape[-2], :]
+        dst_value.copy_(tgt_value, non_blocking=True)
 
     # Update the current length tensor (currently only support batch size is 1)
     current_length_data.fill_(prev_input_len + tgt.shape[-2])
